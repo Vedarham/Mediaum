@@ -9,15 +9,24 @@ import {
   X, 
   Loader2, 
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  Share2
 } from 'lucide-react';
 import { mergePDFs, imagesToPDF } from './utils/pdfProcessor';
 import { pdfToPPT } from './utils/pptProcessor';
+import DirectShare from './components/DirectShare';
 
 const App = () => {
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState('merge');
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.has('session') ? 'share' : 'merge';
+  });
+  const [sessionParam, setSessionParam] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('session') || '';
+  });
   
   const MAX_PDFS = 15;
   const MAX_IMAGES = 30;
@@ -118,104 +127,129 @@ const App = () => {
             >
               PDF to PPT
             </button>
+            <button 
+              onClick={() => { setActiveTab('share'); setFiles([]); }}
+              className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
+            >
+              <Share2 size={16} style={{ marginRight: '6px' }} />
+              Direct Share
+            </button>
           </nav>
         </header>
 
         {/* Main Content */}
         <main className="main-layout">
-          <div className="glass-card">
-            {/* Dropzone */}
-            {files.length === 0 ? (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="dropzone"
-                onClick={() => document.getElementById('file-input').click()}
-              >
-                <div className="icon-wrapper-large float">
-                  <FilePlus className="text-purple-400" size={32} />
-                </div>
-                <h2 className="text-title">Drop your files here</h2>
-                <p className="text-body-large">
-                  {activeTab === 'merge' && `Select up to ${MAX_PDFS} PDF documents to merge them into one seamless file.`}
-                  {activeTab === 'imgToPdf' && `Select up to ${MAX_IMAGES} images to generate a professional PDF.`}
-                  {activeTab === 'pdfToPpt' && `Transform your PDF presentations into editable PowerPoint slides.`}
-                </p>
-                <button className="btn-primary" style={{ margin: '0 auto' }}>
-                  <FilePlus size={18} />
-                  Browse Files
-                </button>
-              </motion.div>
-            ) : (
-              <div className="processing-content">
-                <div className="processing-header">
-                  <div className="status-title-group">
-                    <h3 className="status-title">
-                      <ShieldCheck className="text-success" size={24} />
-                      Ready to Process
-                    </h3>
-                    <p className="status-subtitle">{files.length} files selected for processing</p>
+          <div style={{ display: activeTab === 'share' ? 'block' : 'none' }}>
+            <DirectShare 
+              sessionParam={sessionParam} 
+              onSessionChange={(id) => {
+                const url = new URL(window.location);
+                if (id) {
+                  url.searchParams.set('session', id);
+                } else {
+                  url.searchParams.delete('session');
+                }
+                window.history.pushState({}, '', url);
+                setSessionParam(id);
+              }} 
+            />
+          </div>
+
+          <div style={{ display: activeTab !== 'share' ? 'block' : 'none' }}>
+            <div className="glass-card">
+              {/* Dropzone */}
+              {files.length === 0 ? (
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="dropzone"
+                  onClick={() => document.getElementById('file-input').click()}
+                >
+                  <div className="icon-wrapper-large float">
+                    <FilePlus className="text-purple-400" size={32} />
                   </div>
-                  <button 
-                    onClick={() => document.getElementById('file-input').click()}
-                    className="btn-text"
-                  >
-                    <FilePlus size={18} /> Add More
+                  <h2 className="text-title">Drop your files here</h2>
+                  <p className="text-body-large">
+                    {activeTab === 'merge' && `Select up to ${MAX_PDFS} PDF documents to merge them into one seamless file.`}
+                    {activeTab === 'imgToPdf' && `Select up to ${MAX_IMAGES} images to generate a professional PDF.`}
+                    {activeTab === 'pdfToPpt' && `Transform your PDF presentations into editable PowerPoint slides.`}
+                  </p>
+                  <button className="btn-primary" style={{ margin: '0 auto' }}>
+                    <FilePlus size={18} />
+                    Browse Files
                   </button>
-                </div>
+                </motion.div>
+              ) : (
+                <div className="processing-content">
+                  <div className="processing-header">
+                    <div className="status-title-group">
+                      <h3 className="status-title">
+                        <ShieldCheck className="text-success" size={24} />
+                        Ready to Process
+                      </h3>
+                      <p className="status-subtitle">{files.length} files selected for processing</p>
+                    </div>
+                    <button 
+                      onClick={() => document.getElementById('file-input').click()}
+                      className="btn-text"
+                    >
+                      <FilePlus size={18} /> Add More
+                    </button>
+                  </div>
 
-                <div className="file-list">
-                  <AnimatePresence>
-                    {files.map((file, idx) => (
-                      <motion.div 
-                        key={`${file.name}-${idx}`}
-                        initial={{ opacity: 0, scale: 0.98 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, x: 20 }}
-                        className="file-item"
-                      >
-                        <div className="file-info-group">
-                          <div className={`file-icon-box ${activeTab === 'imgToPdf' ? 'bg-blue-500/10' : 'bg-red-500/10'}`} style={{ backgroundColor: activeTab === 'imgToPdf' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
-                            {activeTab === 'imgToPdf' ? <ImageIcon size={20} className="text-blue-400" /> : <FileText size={20} className="text-red-400" />}
+                  <div className="file-list">
+                    <AnimatePresence>
+                      {files.map((file, idx) => (
+                        <motion.div 
+                          key={`${file.name}-${idx}`}
+                          initial={{ opacity: 0, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, x: 20 }}
+                          className="file-item"
+                        >
+                          <div className="file-info-group">
+                            <div className={`file-icon-box ${activeTab === 'imgToPdf' ? 'bg-blue-500/10' : 'bg-red-500/10'}`} style={{ backgroundColor: activeTab === 'imgToPdf' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
+                              {activeTab === 'imgToPdf' ? <ImageIcon size={20} className="text-blue-400" /> : <FileText size={20} className="text-red-400" />}
+                            </div>
+                            <div className="file-details">
+                              <p className="file-name">{file.name}</p>
+                              <p className="file-size">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                            </div>
                           </div>
-                          <div className="file-details">
-                            <p className="file-name">{file.name}</p>
-                            <p className="file-size">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                          </div>
-                        </div>
-                        <button onClick={() => removeFile(idx)} className="remove-btn">
-                          <X size={18} />
-                        </button>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
+                          <button onClick={() => removeFile(idx)} className="remove-btn">
+                            <X size={18} />
+                          </button>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
 
-                <div className="action-bar">
-                  <button onClick={() => setFiles([])} className="btn-secondary">
-                    Clear Workspace
-                  </button>
-                  <button 
-                    onClick={handleProcess}
-                    disabled={isProcessing}
-                    className="btn-primary"
-                    style={{ minWidth: '180px', justifyContent: 'center' }}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 size={20} className="animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        Start Now
-                        <ChevronRight size={20} />
-                      </>
-                    )}
-                  </button>
+                  <div className="action-bar">
+                    <button onClick={() => setFiles([])} className="btn-secondary">
+                      Clear Workspace
+                    </button>
+                    <button 
+                      onClick={handleProcess}
+                      disabled={isProcessing}
+                      className="btn-primary"
+                      style={{ minWidth: '180px', justifyContent: 'center' }}
+                    >
+                      {isProcessing ? (
+                        <>
+                          <Loader2 size={20} className="animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          Start Now
+                          <ChevronRight size={20} />
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Feature Grid */}

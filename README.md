@@ -8,10 +8,11 @@
 
 ## ✨ Features
 
-- **PDF Merger**: Combine up to 15 PDF files into one seamless document.
-- **Image to PDF**: Convert up to 30 images (JPG, PNG) into a high-quality PDF.
-- **PDF to PPT**: Transform PDF pages into editable PowerPoint slides (rendered as high-resolution images).
-- **Local-First Processing**: All heavy lifting is done in your browser using `pdf-lib` and `pdf.js`.
+- **Merge PDF**: Combine multiple PDF documents into a single, high-quality file.
+- **Images to PDF**: Convert your photos and scans into professional PDF documents.
+- **PDF to PPT**: Transform PDF pages into editable PowerPoint slides.
+- **Collaborative Direct Share**: Real-time, peer-to-peer workspace for sharing files and text between devices (Mobile to Desktop and vice versa) without logins, email, or WhatsApp.
+- **Local-First Processing**: All heavy lifting is done in your browser using `pdf-lib` and `pdf.js`. Data never leaves your device unless you choose to share it.
 - **Premium UI**: Glassmorphism design system with smooth animations via `Framer Motion`.
 
 ## 🛠️ Technology Stack
@@ -40,6 +41,13 @@
    ```bash
    npm run dev
    ```
+
+## 📡 Collaborative Direct Share
+Mediaum features a unique, login-free way to sync your devices:
+1. Open **Direct Share** on your desktop.
+2. Scan the **QR Code** with your mobile or share the **Session Link**.
+3. Instantly share files, links, and notes in a **Unified Feed**.
+4. Data is transferred via **WebRTC (PeerJS)** directly between browsers, ensuring maximum privacy and speed.
 
 ## 🔒 Privacy & Security
 
