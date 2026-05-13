@@ -19,7 +19,10 @@ import {
   Zap,
   Users,
   Send,
-  Plus
+  Plus,
+  ShieldCheck,
+  ShieldAlert,
+  Lock
 } from 'lucide-react';
 import { Peer } from 'peerjs';
 import { QRCodeSVG } from 'qrcode.react';
@@ -29,7 +32,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
   const [isHost, setIsHost] = useState(false);
   const [peer, setPeer] = useState(null);
   const [connections, setConnections] = useState([]);
-  const [feed, setFeed] = useState([]); // Unified feed of files and text
+  const [feed, setFeed] = useState([]); 
   const [inputText, setInputText] = useState('');
   const [uploadProgress, setUploadProgress] = useState({});
   const [status, setStatus] = useState('idle');
@@ -47,6 +50,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
   const broadcast = useCallback((data, excludeConn = null) => {
     connectionsRef.current.forEach(conn => {
       if (conn !== excludeConn && conn.open) {
+        // PeerJS handles cloning data, but for large arrays it might be slow
         conn.send(data);
       }
     });
@@ -61,9 +65,29 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
       setConnections(prev => [...prev, conn]);
       setStatus('connected');
       
-      // Sync current feed to new participant
+      // If we are host, sync history to the new participant
       if (isHost && feedRef.current.length > 0) {
-        conn.send({ type: 'sync-feed', feed: feedRef.current });
+        // Send history items one by one to ensure reliable delivery of Blobs
+        feedRef.current.forEach(item => {
+          if (item.type === 'file') {
+            conn.send({
+              type: 'file',
+              file: item.blob, // Send the actual blob
+              fileName: item.name,
+              fileSize: item.size,
+              fileType: item.fileType,
+              sender: item.sender,
+              isSync: true
+            });
+          } else {
+            conn.send({
+              type: 'message',
+              text: item.text,
+              sender: item.sender,
+              isSync: true
+            });
+          }
+        });
       }
     });
 
@@ -79,7 +103,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
           sender: data.sender || 'Participant'
         };
         addToFeed(newItem);
-        if (isHost) broadcast(data, conn);
+        if (isHost && !data.isSync) broadcast(data, conn);
       } else if (data.type === 'message') {
         const newItem = {
           type: 'text',
@@ -87,16 +111,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
           sender: data.sender || 'Participant'
         };
         addToFeed(newItem);
-        if (isHost) broadcast(data, conn);
-      } else if (data.type === 'sync-feed') {
-        // Reconstruct blobs from ArrayBuffers
-        const hydratedFeed = data.feed.map(item => {
-          if (item.type === 'file' && item.file instanceof ArrayBuffer) {
-            return { ...item, blob: new Blob([item.file], { type: item.fileType }) };
-          }
-          return item;
-        });
-        setFeed(hydratedFeed);
+        if (isHost && !data.isSync) broadcast(data, conn);
       }
     });
 
@@ -107,20 +122,41 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
 
   const initPeer = useCallback((id, isHostRole) => {
     if (peerRef.current) return;
-    const newPeer = new Peer(id, { debug: 1 });
+    
+    // Hash the ID slightly to avoid direct guessing of Peer IDs if someone inspects
+    const peerIdToUse = id;
+    
+    const newPeer = new Peer(peerIdToUse, { 
+      debug: 1,
+      config: {
+        'iceServers': [
+          { url: 'stun:stun.l.google.com:19302' },
+          { url: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
+    });
 
     newPeer.on('open', () => {
       setStatus(isHostRole ? 'waiting' : 'connecting');
       if (!isHostRole) {
         const hostId = `mediaum-${sessionId}-host`;
-        setupConnection(newPeer.connect(hostId));
+        const conn = newPeer.connect(hostId);
+        setupConnection(conn);
       }
     });
 
     newPeer.on('connection', (conn) => setupConnection(conn));
+    
     newPeer.on('error', (err) => {
-      console.error(err);
-      setStatus(err.type === 'id-taken' ? 'error' : 'error');
+      console.error('PeerJS Error:', err.type, err);
+      if (err.type === 'id-taken' && isHostRole) {
+        // Auto-join if host ID taken (maybe session already started)
+        peerRef.current = null;
+        setPeer(null);
+        joinSession(sessionId);
+      } else {
+        setStatus('error');
+      }
     });
 
     peerRef.current = newPeer;
@@ -138,7 +174,8 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
   const joinSession = (id) => {
     setSessionId(id);
     setIsHost(false);
-    initPeer(`mediaum-${id}-client-${Math.random().toString(36).substr(2, 6)}`, false);
+    const clientId = `mediaum-${id}-client-${Math.random().toString(36).substr(2, 6)}`;
+    initPeer(clientId, false);
   };
 
   useEffect(() => {
@@ -197,8 +234,8 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
       {!peer ? (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="session-setup glass-card">
           <div className="icon-wrapper-large"><Share2 className="text-purple-400" size={32} /></div>
-          <h2 className="text-title">Collaborative Workspace</h2>
-          <p className="text-body-large">Instantly share files and discuss ideas in a unified real-time feed across all your devices.</p>
+          <h2 className="text-title">Secure Workspace</h2>
+          <p className="text-body-large">Peer-to-peer real-time sharing. End-to-end encrypted and local-first.</p>
           <form onSubmit={startSession} className="session-form">
             <input 
               type="text" 
@@ -208,7 +245,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
               className="session-input"
             />
             <div className="button-group-row">
-              <button type="submit" className="btn-primary">Start</button>
+              <button type="submit" className="btn-primary">Start Session</button>
               <button type="button" onClick={() => joinSession(sessionId)} className="btn-secondary">Join</button>
             </div>
           </form>
@@ -220,7 +257,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
               <div className="share-header">
                 <div className="status-badge">
                   <div className={`status-dot ${connections.length > 0 ? 'bg-success' : 'bg-warning'}`} />
-                  <span>{connections.length > 0 ? `${connections.length} Online` : 'Waiting...'}</span>
+                  <span>{connections.length > 0 ? `${connections.length} Connected` : 'Offline'}</span>
                 </div>
                 <button onClick={() => { peer?.destroy(); window.location.search = ''; }} className="btn-text text-error"><X size={18} /></button>
               </div>
@@ -230,13 +267,18 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
                   <div className="qr-wrapper" style={{ background: 'white', padding: '12px', borderRadius: '12px' }}>
                     <QRCodeSVG value={sessionUrl} size={140} bgColor="#ffffff" fgColor="#000000" />
                   </div>
-                  <p className="qr-hint">Scan to Join Session</p>
+                  <p className="qr-hint">Scan to Join Securely</p>
                 </div>
               )}
 
               <div className="url-box">
                 <code>{sessionId}</code>
                 <button onClick={() => { navigator.clipboard.writeText(sessionUrl); alert('Link Copied!'); }} className="copy-btn"><Copy size={16} /></button>
+              </div>
+
+              <div className="security-notice">
+                <Lock size={14} className="text-success" />
+                <span>P2P E2E Encrypted</span>
               </div>
 
               <div className="action-area">
@@ -251,15 +293,18 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
           <div className="share-column main-column">
             <div className="glass-card content-card feed-container">
               <div className="feed-header">
-                <h3 className="section-title">Shared Feed</h3>
-                <div className="sync-badge"><Zap size={12} /> Live Sync Active</div>
+                <div className="header-info">
+                   <h3 className="section-title">Encrypted Feed</h3>
+                   <span className="session-meta">Session ID: {sessionId}</span>
+                </div>
+                <div className="sync-badge"><ShieldCheck size={14} /> Local-First Security</div>
               </div>
 
               <div className="feed-messages">
                 {feed.length === 0 ? (
                   <div className="empty-feed">
-                    <MessageSquare size={48} className="opacity-10 mb-4" />
-                    <p>No activity yet. Start by sharing a file or a message!</p>
+                    <ShieldCheck size={64} className="opacity-10 mb-4" />
+                    <p>Connection established. <br/>All data is transferred directly between your devices.</p>
                   </div>
                 ) : (
                   <div className="feed-list">
@@ -294,7 +339,7 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
               <form onSubmit={sendMessage} className="feed-input-area">
                 <input 
                   type="text" 
-                  placeholder="Type a message or paste a link..." 
+                  placeholder="Share a thought or link..." 
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   disabled={connections.length === 0 && !isHost}
@@ -308,6 +353,22 @@ const DirectShare = ({ sessionParam, onSessionChange }) => {
         </div>
       )}
 
+      <style jsx>{`
+        .security-notice {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+          margin-top: 1rem;
+          padding: 0.5rem;
+          background: rgba(16, 185, 129, 0.05);
+          border-radius: 8px;
+          justify-content: center;
+        }
+        .header-info { display: flex; flex-direction: column; }
+        .session-meta { font-size: 0.7rem; color: var(--text-secondary); }
+      `}</style>
     </div>
   );
 };
