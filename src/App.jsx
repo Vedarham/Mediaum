@@ -1,33 +1,52 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  FilePlus, 
-  Files, 
-  Image as ImageIcon, 
-  FileText, 
-  Download, 
-  X, 
-  Loader2, 
+import {
+  FilePlus,
+  Files,
+  Image as ImageIcon,
+  FileText,
+  Download,
+  X,
+  Loader2,
   ChevronRight,
   ShieldCheck,
-  Share2
+  Share2,
+  Terminal,
+  Activity,
+  FileSpreadsheet
 } from 'lucide-react';
 import { mergePDFs, imagesToPDF } from './utils/pdfProcessor';
 import { pdfToPPT } from './utils/pptProcessor';
 import DirectShare from './components/DirectShare';
+import StatusDashboard from './components/StatusDashboard';
+import SmartExcel from './components/SmartExcel';
 
 const App = () => {
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.has('session') ? 'share' : 'merge';
-  });
+  const [activeTab, setActiveTab] = useState('share');
+  const [previewBlob, setPreviewBlob] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
   const [sessionParam, setSessionParam] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('session') || '';
   });
-  
+
+  const shareRef = useRef(null);
+  const [showStatus, setShowStatus] = useState(false);
+  const [systemLogs, setSystemLogs] = useState([]);
+  const [peerStatus, setPeerStatus] = useState('idle');
+  const [connectionsCount, setConnectionsCount] = useState(0);
+
+  const addLog = useCallback((message, type = 'info') => {
+    setSystemLogs(prev => [{
+      time: new Date().toLocaleTimeString([], { hour12: false }),
+      message,
+      type,
+      id: Math.random().toString(36).substr(2, 9)
+    }, ...prev].slice(0, 50));
+  }, []);
+
   const MAX_PDFS = 15;
   const MAX_IMAGES = 30;
 
@@ -52,17 +71,17 @@ const App = () => {
   const handleProcess = async () => {
     if (files.length === 0) return;
     setIsProcessing(true);
-    
+
     try {
       let result;
       let filename = 'mediaum-output';
-      
+
       if (activeTab === 'merge') {
         result = await mergePDFs(files);
-        downloadFile(result, `${filename}.pdf`, 'application/pdf');
+        showPreviewModal(result, `${filename}.pdf`, 'application/pdf');
       } else if (activeTab === 'imgToPdf') {
         result = await imagesToPDF(files);
-        downloadFile(result, `${filename}.pdf`, 'application/pdf');
+        showPreviewModal(result, `${filename}.pdf`, 'application/pdf');
       } else if (activeTab === 'pdfToPpt') {
         for (const file of files) {
           const blob = await pdfToPPT(file);
@@ -71,10 +90,17 @@ const App = () => {
       }
     } catch (error) {
       console.error(error);
+      addLog(`Error: ${error.message}`, 'error');
       alert('Error processing files: ' + error.message);
     } finally {
       setIsProcessing(false);
+      addLog(`Finished processing ${activeTab}`);
     }
+  };
+
+  const showPreviewModal = (blob, name, type) => {
+    setPreviewBlob({ blob, name, type });
+    setShowPreview(true);
   };
 
   const downloadFile = (data, name, type) => {
@@ -92,11 +118,11 @@ const App = () => {
   return (
     <div className="app-container">
       <div className="bg-gradient" />
-      
+
       <div className="container">
         {/* Header */}
         <header>
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             className="header-brand"
@@ -107,41 +133,56 @@ const App = () => {
               <p className="brand-subtitle">Premium Media Suite</p>
             </div>
           </motion.div>
-          
+
           <nav className="tab-group">
-            <button 
+            <button
               onClick={() => { setActiveTab('merge'); setFiles([]); }}
               className={`tab-btn ${activeTab === 'merge' ? 'active' : ''}`}
             >
               Merge PDF
             </button>
-            <button 
+            <button
               onClick={() => { setActiveTab('imgToPdf'); setFiles([]); }}
               className={`tab-btn ${activeTab === 'imgToPdf' ? 'active' : ''}`}
             >
               Images to PDF
             </button>
-            <button 
+            <button
               onClick={() => { setActiveTab('pdfToPpt'); setFiles([]); }}
               className={`tab-btn ${activeTab === 'pdfToPpt' ? 'active' : ''}`}
             >
               PDF to PPT
             </button>
-            <button 
+            <button
               onClick={() => { setActiveTab('share'); setFiles([]); }}
               className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
             >
               <Share2 size={16} style={{ marginRight: '6px' }} />
               Direct Share
             </button>
+            <button 
+              onClick={() => { setActiveTab('excel'); setFiles([]); }}
+              className={`tab-btn ${activeTab === 'excel' ? 'active' : ''}`}
+            >
+              <FileSpreadsheet size={16} style={{ marginRight: '6px' }} />
+              Smart Excel
+            </button>
           </nav>
+
+          <button
+            onClick={() => setShowStatus(!showStatus)}
+            className={`status-toggle-btn ${showStatus ? 'active' : ''}`}
+          >
+            <Activity size={18} />
+            <span>Status</span>
+          </button>
         </header>
 
         {/* Main Content */}
         <main className="main-layout">
           <div style={{ display: activeTab === 'share' ? 'block' : 'none' }}>
-            <DirectShare 
-              sessionParam={sessionParam} 
+            <DirectShare
+              sessionParam={sessionParam}
               onSessionChange={(id) => {
                 const url = new URL(window.location);
                 if (id) {
@@ -151,15 +192,33 @@ const App = () => {
                 }
                 window.history.pushState({}, '', url);
                 setSessionParam(id);
-              }} 
+              }}
+              onStatusUpdate={(data) => {
+                setPeerStatus(data.peerStatus);
+                setConnectionsCount(data.connectionsCount);
+              }}
+              shareRef={shareRef}
             />
           </div>
 
-          <div style={{ display: activeTab !== 'share' ? 'block' : 'none' }}>
+
+          <div style={{ display: activeTab === 'excel' ? 'block' : 'none' }}>
+            <SmartExcel onShare={(file) => {
+              if (shareRef.current) {
+                shareRef.current.shareFile(file);
+                setActiveTab('share');
+                addLog(`Generated and shared Excel: ${file.name}`, 'success');
+              } else {
+                alert('Please start or join a Direct Share session first!');
+              }
+            }} />
+          </div>
+
+          <div style={{ display: (activeTab !== 'share' && activeTab !== 'excel') ? 'block' : 'none' }}>
             <div className="glass-card">
               {/* Dropzone */}
               {files.length === 0 ? (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="dropzone"
@@ -189,7 +248,7 @@ const App = () => {
                       </h3>
                       <p className="status-subtitle">{files.length} files selected for processing</p>
                     </div>
-                    <button 
+                    <button
                       onClick={() => document.getElementById('file-input').click()}
                       className="btn-text"
                     >
@@ -200,7 +259,7 @@ const App = () => {
                   <div className="file-list">
                     <AnimatePresence>
                       {files.map((file, idx) => (
-                        <motion.div 
+                        <motion.div
                           key={`${file.name}-${idx}`}
                           initial={{ opacity: 0, scale: 0.98 }}
                           animate={{ opacity: 1, scale: 1 }}
@@ -228,7 +287,7 @@ const App = () => {
                     <button onClick={() => setFiles([])} className="btn-secondary">
                       Clear Workspace
                     </button>
-                    <button 
+                    <button
                       onClick={handleProcess}
                       disabled={isProcessing}
                       className="btn-primary"
@@ -261,7 +320,7 @@ const App = () => {
               <h4>Lightning Fast</h4>
               <p>Advanced merging algorithms combine your documents in milliseconds without any quality loss.</p>
             </div>
-            
+
             <div className="feature-card">
               <div className="feature-icon-box" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)' }}>
                 <ImageIcon className="text-emerald-400" size={24} />
@@ -269,7 +328,7 @@ const App = () => {
               <h4>Smart Images</h4>
               <p>Automatically optimizes image resolution while converting to PDF for the perfect balance of size and clarity.</p>
             </div>
-            
+
             <div className="feature-card">
               <div className="feature-icon-box" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)' }}>
                 <Download className="text-orange-400" size={24} />
@@ -288,15 +347,63 @@ const App = () => {
           </div>
         </footer>
       </div>
-      
-      <input 
+
+      <input
         id="file-input"
-        type="file" 
-        multiple 
-        hidden 
+        type="file"
+        multiple
+        hidden
         onChange={handleFileChange}
         accept={activeTab === 'imgToPdf' ? 'image/*' : '.pdf'}
       />
+
+      <AnimatePresence>
+        {showPreview && previewBlob && (
+          <div className="preview-overlay" onClick={() => setShowPreview(false)}>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="preview-modal"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="preview-header">
+                <h3>{previewBlob.name}</h3>
+                <button onClick={() => setShowPreview(false)} className="close-btn"><X size={20} /></button>
+              </div>
+              <div className="preview-body">
+                <iframe
+                  src={URL.createObjectURL(previewBlob.blob)}
+                  title="PDF Preview"
+                  className="preview-iframe"
+                />
+              </div>
+              <div className="preview-footer">
+                <button className="btn-secondary" onClick={() => setShowPreview(false)}>Close</button>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    downloadFile(previewBlob.blob, previewBlob.name, previewBlob.type);
+                    setShowPreview(false);
+                  }}
+                >
+                  <Download size={18} /> Download
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showStatus && (
+          <StatusDashboard
+            isOpen={showStatus}
+            onClose={() => setShowStatus(false)}
+            peerStatus={peerStatus}
+            connectionsCount={connectionsCount}
+            logs={systemLogs}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
