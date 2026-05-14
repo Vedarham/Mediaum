@@ -160,7 +160,7 @@ const App = () => {
               <Share2 size={16} style={{ marginRight: '6px' }} />
               Direct Share
             </button>
-            <button 
+            <button
               onClick={() => { setActiveTab('excel'); setFiles([]); }}
               className={`tab-btn ${activeTab === 'excel' ? 'active' : ''}`}
             >
