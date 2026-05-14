@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ErrorBoundary from './ErrorBoundary';
-import { 
-  Share2, 
-  Smartphone, 
-  Monitor, 
-  Upload, 
-  Download, 
-  CheckCircle2, 
+import {
+  Share2,
+  Smartphone,
+  Monitor,
+  Upload,
+  Download,
+  CheckCircle2,
   AlertCircle,
   Copy,
   ExternalLink,
@@ -33,10 +33,10 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
   const [isHost, setIsHost] = useState(false);
   const [peer, setPeer] = useState(null);
   const [connections, setConnections] = useState([]);
-  const [feed, setFeed] = useState([]); 
+  const [feed, setFeed] = useState([]);
   const [inputText, setInputText] = useState('');
   const [status, setStatus] = useState('idle');
-  
+
   const fileInputRef = useRef(null);
   const peerRef = useRef(null);
   const connectionsRef = useRef([]);
@@ -76,7 +76,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
         return [...prev, conn];
       });
       setStatus('connected');
-      
+
       if (isHost && feedRef.current.length > 0) {
         feedRef.current.forEach(item => {
           try {
@@ -138,12 +138,19 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
     conn.on('close', () => {
       setConnections(prev => prev.filter(c => c.peer !== conn.peer));
     });
-    
+
     conn.on('error', (err) => {
       console.error('Connection error:', err);
       setConnections(prev => prev.filter(c => c.peer !== conn.peer));
     });
   }, [isHost, broadcast, addToFeed]);
+
+  const [internalLogs, setInternalLogs] = useState([]);
+  
+  const addInternalLog = (msg, type = 'info') => {
+    console.log(`[P2P] ${msg}`);
+    setInternalLogs(prev => [...prev.slice(-4), { msg, type, time: new Date().toLocaleTimeString() }]);
+  };
 
   const initPeer = useCallback((id, isHostRole, targetSessionId) => {
     if (peerRef.current) {
@@ -151,8 +158,11 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
       peerRef.current = null;
     }
     
+    addInternalLog(`Initializing as ${isHostRole ? 'HOST' : 'CLIENT'}...`, 'info');
+    
+    // Explicitly use PeerJS Cloud with secure settings for Vercel
     const newPeer = new Peer(id, { 
-      debug: 1,
+      debug: 2,
       host: '0.peerjs.com',
       port: 443,
       secure: true,
@@ -168,32 +178,59 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
       }
     });
 
+    const connectToHost = (retryCount = 0) => {
+      if (isHostRole) return;
+      const hostId = `mediaum-${targetSessionId}-host`;
+      addInternalLog(`Searching for host... (Attempt ${retryCount + 1})`, 'info');
+      
+      const conn = newPeer.connect(hostId, { 
+        reliable: true,
+        metadata: { sender: 'Participant' }
+      });
+      
+      setupConnection(conn);
+
+      const timeout = setTimeout(() => {
+        const isConnected = connectionsRef.current.some(c => c.peer === hostId);
+        if (!isConnected && retryCount < 3) {
+          addInternalLog(`Host not responding, retrying...`, 'warning');
+          conn.close();
+          connectToHost(retryCount + 1);
+        } else if (!isConnected) {
+          addInternalLog(`Failed to reach host after 4 attempts.`, 'error');
+          setStatus('error');
+        }
+      }, 6000);
+
+      conn.on('open', () => {
+        clearTimeout(timeout);
+        addInternalLog(`Connected to Host!`, 'success');
+      });
+    };
+
     newPeer.on('open', () => {
-      console.log(`Peer opened with ID: ${id}`);
+      addInternalLog(`Signal Server Ready. ID: ${id.split('-').pop()}`, 'success');
       setStatus(isHostRole ? 'waiting' : 'connecting');
-      if (!isHostRole) {
-        const hostId = `mediaum-${targetSessionId}-host`;
-        const conn = newPeer.connect(hostId, { 
-          reliable: true,
-          metadata: { sender: 'Participant' } 
-        });
-        setupConnection(conn);
-      }
+      if (!isHostRole) connectToHost();
+    });
+
+    newPeer.on('disconnected', () => {
+      addInternalLog(`Signal disconnected. Reconnecting...`, 'warning');
+      newPeer.reconnect();
     });
 
     newPeer.on('connection', (conn) => {
-      console.log('Incoming connection from:', conn.peer);
+      addInternalLog(`Incoming connection from ${conn.peer.split('-').pop()}`, 'success');
       setupConnection(conn);
     });
     
     newPeer.on('error', (err) => {
-      console.error('PeerJS Error:', err.type, err);
+      addInternalLog(`Peer Error: ${err.type}`, 'error');
       if (err.type === 'id-taken' && isHostRole) {
-        console.warn('Host ID taken, switching to client mode...');
+        addInternalLog(`Session exists. Switching to JOIN mode...`, 'info');
         setTimeout(() => joinSession(targetSessionId), 500);
-      } else if (err.type === 'peer-unavailable') {
-        console.error('Host not found or unavailable');
-        setStatus('error');
+      } else if (err.type === 'peer-unavailable' && !isHostRole) {
+        addInternalLog(`Host is offline or unreachable.`, 'warning');
       } else {
         setStatus('error');
       }
@@ -308,9 +345,9 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
           <h2 className="text-title">Secure Workspace</h2>
           <p className="text-body-large">Peer-to-peer real-time sharing. End-to-end encrypted and local-first.</p>
           <form onSubmit={startSession} className="session-form">
-            <input 
-              type="text" 
-              placeholder="Session ID (e.g. project-x)" 
+            <input
+              type="text"
+              placeholder="Session ID (e.g. project-x)"
               value={sessionId}
               onChange={(e) => setSessionId(e.target.value)}
               className="session-input"
@@ -357,6 +394,21 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
                 <span>P2P E2E Encrypted</span>
               </div>
 
+              <div className="internal-logs-section">
+                <div className="logs-header">
+                  <Zap size={12} className="text-purple-400" />
+                  <span>Signal Activity</span>
+                </div>
+                <div className="logs-list">
+                  {internalLogs.map((log, i) => (
+                    <div key={i} className={`internal-log-item log-${log.type}`}>
+                      <span className="log-msg">{log.msg}</span>
+                    </div>
+                  ))}
+                  {internalLogs.length === 0 && <span className="opacity-30 text-xs italic">Idle...</span>}
+                </div>
+              </div>
+
               <div className="action-area">
                 <button className="btn-primary w-full" onClick={() => fileInputRef.current.click()} disabled={connections.length === 0}>
                   <Upload size={18} /> Share Media
@@ -370,8 +422,8 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
             <div className="glass-card content-card feed-container">
               <div className="feed-header">
                 <div className="header-info">
-                   <h3 className="section-title">Encrypted Feed</h3>
-                   <span className="session-meta">Session ID: {sessionId}</span>
+                  <h3 className="section-title">Encrypted Feed</h3>
+                  <span className="session-meta">Session ID: {sessionId}</span>
                 </div>
                 <div className="sync-badge"><ShieldCheck size={14} /> Local-First Security</div>
               </div>
@@ -381,7 +433,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
                   {feed.length === 0 ? (
                     <div className="empty-feed">
                       <ShieldCheck size={64} className="opacity-10 mb-4" />
-                      <p>Connection established. <br/>All data is transferred directly between your devices.</p>
+                      <p>Connection established. <br />All data is transferred directly between your devices.</p>
                     </div>
                   ) : (
                     <div className="feed-list">
@@ -389,7 +441,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
                         {feed.map((item) => {
                           const itemTimestamp = item.timestamp ? new Date(item.timestamp) : new Date();
                           const isValidDate = !isNaN(itemTimestamp.getTime());
-                          
+
                           return (
                             <motion.div key={item.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="feed-item">
                               <div className="feed-item-header">
@@ -398,7 +450,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
                                   {isValidDate ? itemTimestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                                 </span>
                               </div>
-                              
+
                               {item.type === 'file' ? (
                                 <div className="feed-file-content" onClick={() => downloadFile(item)}>
                                   <div className="file-icon-box-small">
@@ -424,9 +476,9 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
               </div>
 
               <form onSubmit={sendMessage} className="feed-input-area">
-                <input 
-                  type="text" 
-                  placeholder="Share a thought or link..." 
+                <input
+                  type="text"
+                  placeholder="Share a thought or link..."
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   disabled={connections.length === 0 && !isHost}
