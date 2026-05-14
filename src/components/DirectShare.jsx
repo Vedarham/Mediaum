@@ -153,32 +153,46 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
     
     const newPeer = new Peer(id, { 
       debug: 1,
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true,
       config: {
         'iceServers': [
-          { url: 'stun:stun.l.google.com:19302' },
-          { url: 'stun:stun1.l.google.com:19302' },
-          { url: 'stun:stun2.l.google.com:19302' }
-        ]
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' }
+        ],
+        'sdpSemantics': 'unified-plan'
       }
     });
 
     newPeer.on('open', () => {
+      console.log(`Peer opened with ID: ${id}`);
       setStatus(isHostRole ? 'waiting' : 'connecting');
       if (!isHostRole) {
         const hostId = `mediaum-${targetSessionId}-host`;
-        const conn = newPeer.connect(hostId, { reliable: true });
+        const conn = newPeer.connect(hostId, { 
+          reliable: true,
+          metadata: { sender: 'Participant' } 
+        });
         setupConnection(conn);
       }
     });
 
-    newPeer.on('connection', (conn) => setupConnection(conn));
+    newPeer.on('connection', (conn) => {
+      console.log('Incoming connection from:', conn.peer);
+      setupConnection(conn);
+    });
     
     newPeer.on('error', (err) => {
       console.error('PeerJS Error:', err.type, err);
       if (err.type === 'id-taken' && isHostRole) {
-        // If host ID taken, try to join instead
-        joinSession(targetSessionId);
-      } else if (err.type === 'peer-unavailable' || err.type === 'network') {
+        console.warn('Host ID taken, switching to client mode...');
+        setTimeout(() => joinSession(targetSessionId), 500);
+      } else if (err.type === 'peer-unavailable') {
+        console.error('Host not found or unavailable');
         setStatus('error');
       } else {
         setStatus('error');
@@ -191,18 +205,21 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
 
   const startSession = (e) => {
     e?.preventDefault();
-    if (!sessionId) return;
-    onSessionChange(sessionId);
+    const cleanId = sessionId.trim().toLowerCase();
+    if (!cleanId) return;
+    onSessionChange(cleanId);
+    setSessionId(cleanId);
     setIsHost(true);
-    initPeer(`mediaum-${sessionId}-host`, true, sessionId);
+    initPeer(`mediaum-${cleanId}-host`, true, cleanId);
   };
 
   const joinSession = (id) => {
-    if (!id) return;
-    setSessionId(id);
+    const cleanId = (id || '').trim().toLowerCase();
+    if (!cleanId) return;
+    setSessionId(cleanId);
     setIsHost(false);
-    const clientId = `mediaum-${id}-client-${Math.random().toString(36).substr(2, 6)}`;
-    initPeer(clientId, false, id);
+    const clientId = `mediaum-${cleanId}-client-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    initPeer(clientId, false, cleanId);
   };
 
   useEffect(() => {
@@ -311,8 +328,13 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
               <div className="share-header">
                 <div className="status-badge">
                   <div className={`status-dot ${connections.length > 0 ? 'bg-success' : 'bg-warning'}`} />
-                  <span>{connections.length > 0 ? `${connections.length} Connected` : 'Offline'}</span>
+                  <span>{connections.length > 0 ? `${connections.length} Connected` : status === 'error' ? 'Connection Failed' : 'Offline'}</span>
                 </div>
+                {status === 'error' && (
+                  <button onClick={() => isHost ? startSession() : joinSession(sessionId)} className="btn-retry">
+                    <Zap size={14} /> Retry
+                  </button>
+                )}
                 <button onClick={() => { peer?.destroy(); window.location.search = ''; }} className="btn-text text-error"><X size={18} /></button>
               </div>
 

@@ -1187,3 +1187,20 @@ footer {
 .log-success { color: #34d399; }
 .log-error { color: #f87171; }
 .log-warning { color: #fbbf24; }
+
+.btn-retry {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 10px;
+}
+
