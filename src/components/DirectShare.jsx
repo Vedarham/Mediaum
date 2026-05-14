@@ -70,6 +70,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
 
   const setupConnection = useCallback((conn) => {
     conn.on('open', () => {
+      addInternalLog(`Data channel open with ${conn.peer.split('-').pop()}`, 'success');
       setConnections(prev => {
         // Prevent duplicate connections from same peer
         if (prev.find(c => c.peer === conn.peer)) return prev;
@@ -140,7 +141,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
     });
 
     conn.on('error', (err) => {
-      console.error('Connection error:', err);
+      addInternalLog(`Channel error: ${err.message}`, 'error');
       setConnections(prev => prev.filter(c => c.peer !== conn.peer));
     });
   }, [isHost, broadcast, addToFeed]);
@@ -153,30 +154,46 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
   };
 
   const initPeer = useCallback((id, isHostRole, targetSessionId) => {
+    // Force cleanup of old peer and connections
     if (peerRef.current) {
+      addInternalLog('Cleaning up previous session...', 'info');
+      connectionsRef.current.forEach(c => c.close());
+      setConnections([]);
       peerRef.current.destroy();
       peerRef.current = null;
     }
     
-    addInternalLog(`Initializing as ${isHostRole ? 'HOST' : 'CLIENT'}...`, 'info');
-    
-    // Explicitly use PeerJS Cloud with secure settings for Vercel
-    const newPeer = new Peer(id, { 
-      debug: 2,
-      host: '0.peerjs.com',
-      port: 443,
-      secure: true,
-      config: {
-        'iceServers': [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' }
-        ],
-        'sdpSemantics': 'unified-plan'
-      }
-    });
+    // Small delay to ensure signaling server registers the destruction
+    setTimeout(() => {
+      addInternalLog(`Initializing as ${isHostRole ? 'HOST' : 'CLIENT'}...`, 'info');
+      
+      const newPeer = new Peer(id, { 
+        debug: 2,
+        host: '0.peerjs.com',
+        port: 443,
+        secure: true,
+        config: {
+          'iceServers': [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:openrelay.metered.ca:80' },
+            { 
+              urls: 'turn:openrelay.metered.ca:80', 
+              username: 'openrelayproject', 
+              credential: 'openrelayproject' 
+            },
+            { 
+              urls: 'turn:openrelay.metered.ca:443', 
+              username: 'openrelayproject', 
+              credential: 'openrelayproject' 
+            },
+            { 
+              urls: 'turn:openrelay.metered.ca:443?transport=tcp', 
+              username: 'openrelayproject', 
+              credential: 'openrelayproject' 
+            }
+          ]
+        }
+      });
 
     const connectToHost = (retryCount = 0) => {
       if (isHostRole) return;
@@ -238,7 +255,8 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
 
     peerRef.current = newPeer;
     setPeer(newPeer);
-  }, [setupConnection]);
+    }, 300);
+  }, [setupConnection, joinSession]);
 
   const startSession = (e) => {
     e?.preventDefault();
@@ -253,6 +271,7 @@ const DirectShare = ({ sessionParam, onSessionChange, onStatusUpdate, shareRef }
   const joinSession = (id) => {
     const cleanId = (id || '').trim().toLowerCase();
     if (!cleanId) return;
+    onSessionChange(cleanId); // Synchronize URL
     setSessionId(cleanId);
     setIsHost(false);
     const clientId = `mediaum-${cleanId}-client-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
