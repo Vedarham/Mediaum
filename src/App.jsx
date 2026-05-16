@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FilePlus,
@@ -16,7 +16,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { mergePDFs, imagesToPDF } from './utils/pdfProcessor';
-import { pdfToPPT } from './utils/pptProcessor';
+import { pdfToPPT, imagesToPPT } from './utils/pptProcessor';
 import DirectShare from './components/DirectShare';
 import StatusDashboard from './components/StatusDashboard';
 import SmartExcel from './components/SmartExcel';
@@ -27,10 +27,21 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('share');
   const [previewBlob, setPreviewBlob] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [sessionParam, setSessionParam] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('session') || '';
   });
+
+  useEffect(() => {
+    if (previewBlob?.blob) {
+      const url = URL.createObjectURL(previewBlob.blob);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [previewBlob]);
 
   const shareRef = useRef(null);
   const [showStatus, setShowStatus] = useState(false);
@@ -60,6 +71,7 @@ const App = () => {
       const combined = [...prev, ...newFiles];
       if (activeTab === 'merge' && combined.length > MAX_PDFS) return combined.slice(0, MAX_PDFS);
       if (activeTab === 'imgToPdf' && combined.length > MAX_IMAGES) return combined.slice(0, MAX_IMAGES);
+      if (activeTab === 'imgToPpt' && combined.length > MAX_IMAGES) return combined.slice(0, MAX_IMAGES);
       return combined;
     });
   };
@@ -83,10 +95,13 @@ const App = () => {
         result = await imagesToPDF(files);
         showPreviewModal(result, `${filename}.pdf`, 'application/pdf');
       } else if (activeTab === 'pdfToPpt') {
-        for (const file of files) {
-          const blob = await pdfToPPT(file);
-          downloadFile(blob, `${file.name.split('.')[0]}.pptx`, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-        }
+        result = await pdfToPPT(files);
+        downloadFile(result, `${filename}.pptx`, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+        addLog(`Converted ${files.length} PDFs into one PPTX`, 'success');
+      } else if (activeTab === 'imgToPpt') {
+        result = await imagesToPPT(files);
+        downloadFile(result, `${filename}.pptx`, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+        addLog(`Converted ${files.length} images into one PPTX`, 'success');
       }
     } catch (error) {
       console.error(error);
@@ -98,7 +113,8 @@ const App = () => {
     }
   };
 
-  const showPreviewModal = (blob, name, type) => {
+  const showPreviewModal = (data, name, type) => {
+    const blob = data instanceof Blob ? data : new Blob([data], { type });
     setPreviewBlob({ blob, name, type });
     setShowPreview(true);
   };
@@ -152,6 +168,12 @@ const App = () => {
               className={`tab-btn ${activeTab === 'pdfToPpt' ? 'active' : ''}`}
             >
               PDF to PPT
+            </button>
+            <button
+              onClick={() => { setActiveTab('imgToPpt'); setFiles([]); }}
+              className={`tab-btn ${activeTab === 'imgToPpt' ? 'active' : ''}`}
+            >
+              Images to PPT
             </button>
             <button
               onClick={() => { setActiveTab('share'); setFiles([]); }}
@@ -231,7 +253,8 @@ const App = () => {
                   <p className="text-body-large">
                     {activeTab === 'merge' && `Select up to ${MAX_PDFS} PDF documents to merge them into one seamless file.`}
                     {activeTab === 'imgToPdf' && `Select up to ${MAX_IMAGES} images to generate a professional PDF.`}
-                    {activeTab === 'pdfToPpt' && `Transform your PDF presentations into editable PowerPoint slides.`}
+                    {activeTab === 'pdfToPpt' && `Convert one or more PDFs into a single presentation.`}
+                    {activeTab === 'imgToPpt' && `Turn your images into a professional presentation.`}
                   </p>
                   <button className="btn-primary" style={{ margin: '0 auto' }}>
                     <FilePlus size={18} />
@@ -354,7 +377,7 @@ const App = () => {
         multiple
         hidden
         onChange={handleFileChange}
-        accept={activeTab === 'imgToPdf' ? 'image/*' : '.pdf'}
+        accept={activeTab === 'imgToPdf' || activeTab === 'imgToPpt' ? 'image/*' : '.pdf'}
       />
 
       <AnimatePresence>
@@ -373,7 +396,7 @@ const App = () => {
               </div>
               <div className="preview-body">
                 <iframe
-                  src={URL.createObjectURL(previewBlob.blob)}
+                  src={previewUrl}
                   title="PDF Preview"
                   className="preview-iframe"
                 />
