@@ -9,14 +9,15 @@ import {
   X,
   Loader2,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   ShieldCheck,
   Share2,
-  Terminal,
   Activity,
   FileSpreadsheet
 } from 'lucide-react';
 import { mergePDFs, imagesToPDF } from './utils/pdfProcessor';
-import { pdfToPPT, imagesToPPT } from './utils/pptProcessor';
+import { pdfToPPT, imagesToPPT, pptToPDF } from './utils/pptProcessor';
 import DirectShare from './components/DirectShare';
 import StatusDashboard from './components/StatusDashboard';
 import SmartExcel from './components/SmartExcel';
@@ -72,12 +73,29 @@ const App = () => {
       if (activeTab === 'merge' && combined.length > MAX_PDFS) return combined.slice(0, MAX_PDFS);
       if (activeTab === 'imgToPdf' && combined.length > MAX_IMAGES) return combined.slice(0, MAX_IMAGES);
       if (activeTab === 'imgToPpt' && combined.length > MAX_IMAGES) return combined.slice(0, MAX_IMAGES);
+      if (activeTab === 'pptToPdf' && combined.length > 10) return combined.slice(0, 10);
       return combined;
     });
   };
 
   const removeFile = (index) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const moveFile = (index, direction) => {
+    setFiles(prev => {
+      const updated = [...prev];
+      const newIndex = index + direction;
+      if (newIndex < 0 || newIndex >= updated.length) return prev;
+      
+      // Swap elements in place
+      const temp = updated[index];
+      updated[index] = updated[newIndex];
+      updated[newIndex] = temp;
+      
+      return updated;
+    });
+    addLog(`Reordered conversion list`, 'info');
   };
 
   const handleProcess = async () => {
@@ -102,6 +120,24 @@ const App = () => {
         result = await imagesToPPT(files);
         downloadFile(result, `${filename}.pptx`, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
         addLog(`Converted ${files.length} images into one PPTX`, 'success');
+      } else if (activeTab === 'pptToPdf') {
+        const filesToProcess = files.slice(0, 10);
+        addLog(`Starting batch conversion for ${filesToProcess.length} PowerPoint presentations...`, 'info');
+
+        for (let i = 0; i < filesToProcess.length; i++) {
+          const file = filesToProcess[i];
+          addLog(`Converting slide deck ${i + 1}/${filesToProcess.length}: "${file.name}"...`, 'info');
+          const pdfBytes = await pptToPDF(file);
+
+          if (filesToProcess.length === 1) {
+            // Render beautiful visual preview modal if only 1 PPT uploaded
+            showPreviewModal(pdfBytes, `${file.name.replace(/\.[^/.]+$/, "")}.pdf`, 'application/pdf');
+          } else {
+            // Direct download each compiled file for multiple batch conversion
+            downloadFile(pdfBytes, `${file.name.replace(/\.[^/.]+$/, "")}.pdf`, 'application/pdf');
+            addLog(`Successfully converted and downloaded "${file.name}"`, 'success');
+          }
+        }
       }
     } catch (error) {
       console.error(error);
@@ -131,73 +167,115 @@ const App = () => {
     URL.revokeObjectURL(url);
   };
 
+  const getFileIcon = () => {
+    if (activeTab === 'imgToPdf' || activeTab === 'imgToPpt') {
+      return <ImageIcon size={20} className="text-blue-400" />;
+    }
+    if (activeTab === 'pptToPdf') {
+      return <FileText size={20} className="text-orange-400" />;
+    }
+    return <FileText size={20} className="text-red-400" />;
+  };
+
+  const getFileIconBg = () => {
+    if (activeTab === 'imgToPdf' || activeTab === 'imgToPpt') {
+      return 'rgba(59, 130, 246, 0.1)';
+    }
+    if (activeTab === 'pptToPdf') {
+      return 'rgba(249, 115, 22, 0.1)';
+    }
+    return 'rgba(239, 68, 68, 0.1)';
+  };
+
+  const getAcceptTypes = () => {
+    if (activeTab === 'imgToPdf' || activeTab === 'imgToPpt') {
+      return "image/*";
+    }
+    if (activeTab === 'pptToPdf') {
+      return ".pptx,.ppt";
+    }
+    return ".pdf";
+  };
+
   return (
     <div className="app-container">
       <div className="bg-gradient" />
 
       <div className="container">
         {/* Header */}
-        <header>
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="header-brand"
-          >
-            <img src="/logo.png" alt="Mediaum" className="logo" />
-            <div>
-              <h1 className="brand-title">Mediaum</h1>
-              <p className="brand-subtitle">Premium Media Suite</p>
-            </div>
-          </motion.div>
+        <header style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', padding: '2.5rem 0', marginBottom: '3rem' }}>
+          {/* Brand Row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="header-brand"
+            >
+              <img src="/logo.png" alt="Mediaum" className="logo" />
+              <div>
+                <h1 className="brand-title">Mediaum</h1>
+                <p className="brand-subtitle">Premium Media Suite</p>
+              </div>
+            </motion.div>
 
-          <nav className="tab-group">
             <button
-              onClick={() => { setActiveTab('merge'); setFiles([]); }}
-              className={`tab-btn ${activeTab === 'merge' ? 'active' : ''}`}
+              onClick={() => setShowStatus(!showStatus)}
+              className={`status-toggle-btn ${showStatus ? 'active' : ''}`}
             >
-              Merge PDF
+              <Activity size={18} />
+              <span>Status</span>
             </button>
-            <button
-              onClick={() => { setActiveTab('imgToPdf'); setFiles([]); }}
-              className={`tab-btn ${activeTab === 'imgToPdf' ? 'active' : ''}`}
-            >
-              Images to PDF
-            </button>
-            <button
-              onClick={() => { setActiveTab('pdfToPpt'); setFiles([]); }}
-              className={`tab-btn ${activeTab === 'pdfToPpt' ? 'active' : ''}`}
-            >
-              PDF to PPT
-            </button>
-            <button
-              onClick={() => { setActiveTab('imgToPpt'); setFiles([]); }}
-              className={`tab-btn ${activeTab === 'imgToPpt' ? 'active' : ''}`}
-            >
-              Images to PPT
-            </button>
-            <button
-              onClick={() => { setActiveTab('share'); setFiles([]); }}
-              className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
-            >
-              <Share2 size={16} style={{ marginRight: '6px' }} />
-              Direct Share
-            </button>
-            <button
-              onClick={() => { setActiveTab('excel'); setFiles([]); }}
-              className={`tab-btn ${activeTab === 'excel' ? 'active' : ''}`}
-            >
-              <FileSpreadsheet size={16} style={{ marginRight: '6px' }} />
-              Smart Excel
-            </button>
-          </nav>
+          </div>
 
-          <button
-            onClick={() => setShowStatus(!showStatus)}
-            className={`status-toggle-btn ${showStatus ? 'active' : ''}`}
-          >
-            <Activity size={18} />
-            <span>Status</span>
-          </button>
+          {/* Navigation Row */}
+          <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+            <nav className="tab-group" style={{ flexWrap: 'wrap', justifyContent: 'center', gap: '6px', width: 'auto' }}>
+              <button
+                onClick={() => { setActiveTab('merge'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'merge' ? 'active' : ''}`}
+              >
+                Merge PDF
+              </button>
+              <button
+                onClick={() => { setActiveTab('imgToPdf'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'imgToPdf' ? 'active' : ''}`}
+              >
+                Images to PDF
+              </button>
+              <button
+                onClick={() => { setActiveTab('pdfToPpt'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'pdfToPpt' ? 'active' : ''}`}
+              >
+                PDF to PPT
+              </button>
+              <button
+                onClick={() => { setActiveTab('imgToPpt'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'imgToPpt' ? 'active' : ''}`}
+              >
+                Images to PPT
+              </button>
+              <button
+                onClick={() => { setActiveTab('pptToPdf'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'pptToPdf' ? 'active' : ''}`}
+              >
+                PPT to PDF
+              </button>
+              <button
+                onClick={() => { setActiveTab('share'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
+              >
+                <Share2 size={16} style={{ marginRight: '6px' }} />
+                Direct Share
+              </button>
+              <button
+                onClick={() => { setActiveTab('excel'); setFiles([]); }}
+                className={`tab-btn ${activeTab === 'excel' ? 'active' : ''}`}
+              >
+                <FileSpreadsheet size={16} style={{ marginRight: '6px' }} />
+                Smart Excel
+              </button>
+            </nav>
+          </div>
         </header>
 
         {/* Main Content */}
@@ -222,7 +300,6 @@ const App = () => {
               shareRef={shareRef}
             />
           </div>
-
 
           <div style={{ display: activeTab === 'excel' ? 'block' : 'none' }}>
             <SmartExcel onShare={(file) => {
@@ -255,6 +332,7 @@ const App = () => {
                     {activeTab === 'imgToPdf' && `Select up to ${MAX_IMAGES} images to generate a professional PDF.`}
                     {activeTab === 'pdfToPpt' && `Convert one or more PDFs into a single presentation.`}
                     {activeTab === 'imgToPpt' && `Turn your images into a professional presentation.`}
+                    {activeTab === 'pptToPdf' && `Select up to 10 PowerPoint presentations (.pptx) to convert their slide layouts and text into professional PDFs at once.`}
                   </p>
                   <button className="btn-primary" style={{ margin: '0 auto' }}>
                     <FilePlus size={18} />
@@ -271,12 +349,15 @@ const App = () => {
                       </h3>
                       <p className="status-subtitle">{files.length} files selected for processing</p>
                     </div>
-                    <button
-                      onClick={() => document.getElementById('file-input').click()}
-                      className="btn-text"
-                    >
-                      <FilePlus size={18} /> Add More
-                    </button>
+                    {/* Hide Add More button when slide queue limit is reached */}
+                    {(activeTab !== 'pptToPdf' || files.length < 10) && (
+                      <button
+                        onClick={() => document.getElementById('file-input').click()}
+                        className="btn-text"
+                      >
+                        <FilePlus size={18} /> Add More
+                      </button>
+                    )}
                   </div>
 
                   <div className="file-list">
@@ -290,17 +371,63 @@ const App = () => {
                           className="file-item"
                         >
                           <div className="file-info-group">
-                            <div className={`file-icon-box ${activeTab === 'imgToPdf' ? 'bg-blue-500/10' : 'bg-red-500/10'}`} style={{ backgroundColor: activeTab === 'imgToPdf' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
-                              {activeTab === 'imgToPdf' ? <ImageIcon size={20} className="text-blue-400" /> : <FileText size={20} className="text-red-400" />}
+                            <div className="file-icon-box" style={{ backgroundColor: getFileIconBg() }}>
+                              {getFileIcon()}
                             </div>
                             <div className="file-details">
                               <p className="file-name">{file.name}</p>
                               <p className="file-size">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                             </div>
                           </div>
-                          <button onClick={() => removeFile(idx)} className="remove-btn">
-                            <X size={18} />
-                          </button>
+                          
+                          <div style={{ display: 'flex', alignItems: 'center' }}>
+                            {/* Reorder Buttons inside File List */}
+                            {files.length > 1 && (
+                              <div style={{ display: 'flex', gap: '4px', marginRight: '12px' }}>
+                                <button 
+                                  disabled={idx === 0} 
+                                  onClick={() => moveFile(idx, -1)}
+                                  className="reorder-btn"
+                                  title="Move Up"
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: idx === 0 ? 'rgba(255,255,255,0.06)' : 'var(--text-secondary)',
+                                    cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                                    padding: '4px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    borderRadius: '6px',
+                                    transition: 'background 0.2s'
+                                  }}
+                                >
+                                  <ChevronUp size={16} />
+                                </button>
+                                <button 
+                                  disabled={idx === files.length - 1} 
+                                  onClick={() => moveFile(idx, 1)}
+                                  className="reorder-btn"
+                                  title="Move Down"
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: idx === files.length - 1 ? 'rgba(255,255,255,0.06)' : 'var(--text-secondary)',
+                                    cursor: idx === files.length - 1 ? 'not-allowed' : 'pointer',
+                                    padding: '4px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    borderRadius: '6px',
+                                    transition: 'background 0.2s'
+                                  }}
+                                >
+                                  <ChevronDown size={16} />
+                                </button>
+                              </div>
+                            )}
+                            <button onClick={() => removeFile(idx)} className="remove-btn">
+                              <X size={18} />
+                            </button>
+                          </div>
                         </motion.div>
                       ))}
                     </AnimatePresence>
@@ -341,15 +468,15 @@ const App = () => {
                 <Files className="text-blue-400" size={24} />
               </div>
               <h4>Lightning Fast</h4>
-              <p>Advanced merging algorithms combine your documents in milliseconds without any quality loss.</p>
+              <p>Advanced merging and compilation algorithms combine your documents in milliseconds without any quality loss.</p>
             </div>
 
             <div className="feature-card">
               <div className="feature-icon-box" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)' }}>
                 <ImageIcon className="text-emerald-400" size={24} />
               </div>
-              <h4>Smart Images</h4>
-              <p>Automatically optimizes image resolution while converting to PDF for the perfect balance of size and clarity.</p>
+              <h4>Smart Content</h4>
+              <p>Automatically renders PowerPoint vector paths, text wrapping, and colors locally in real-time.</p>
             </div>
 
             <div className="feature-card">
@@ -377,7 +504,7 @@ const App = () => {
         multiple
         hidden
         onChange={handleFileChange}
-        accept={activeTab === 'imgToPdf' || activeTab === 'imgToPpt' ? 'image/*' : '.pdf'}
+        accept={getAcceptTypes()}
       />
 
       <AnimatePresence>
